@@ -100,6 +100,12 @@
     <label><input type="radio" name="pattern" value="fadezoom">フェード＋ズーム（溶けながら寄る）</label>
     <label><input type="radio" name="pattern" value="flip">カードめくり（ひっくり返る）</label>
     <label><input type="radio" name="pattern" value="page">ページ捲り（ページをめくる感じ）</label>
+    <label><input type="radio" name="pattern" value="collage">コラージュ（2枚を並べて見せる）</label>
+  </div>
+  <h2 style="margin-top:14px;">写真の見せ方</h2>
+  <div class="choices" id="fitChoices">
+    <label><input type="radio" name="fit" value="cover" checked>トリミング（画面いっぱいに広げる）</label>
+    <label><input type="radio" name="fit" value="blur">ぼかし背景（写真全体を見せる）</label>
   </div>
 </section>
 
@@ -156,9 +162,30 @@ function selected(name) {
 }
 function transDur(pattern) { return pattern === 'cut' ? 0 : T_TRANS; }
 function ease(p) { return p * p * (3 - 2 * p); }
+function easeInOut(p) {
+  p = Math.max(0, Math.min(1, p));
+  return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+}
 
 /* ===== 描画 ===== */
-// 写真を画面いっぱいに（中央トリミング）描く。
+var activeFit = 'cover'; // 'cover'（トリミング） / 'blur'（ぼかし背景）
+
+// ぼかし背景用：小さく描いて拡大することでぼかした絵を作る（使い回す）
+function getBlurred(img) {
+  if (img._blurCv) return img._blurCv;
+  var s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+  var dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+  var f = 24;
+  var c = document.createElement('canvas');
+  c.width = Math.max(2, Math.round(dw / f));
+  c.height = Math.max(2, Math.round(dh / f));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  img._blurCv = c;
+  return c;
+}
+
+// 写真を描く。見せ方（activeFit）で切り替える。
+// cover: 画面いっぱいに中央トリミング / blur: ぼかし背景＋写真全体
 // opts: alpha / zoom / sx（横方向の潰れ：カードめくり用）/ shade（影）
 function drawCover(img, opts) {
   opts = opts || {};
@@ -166,18 +193,111 @@ function drawCover(img, opts) {
   var zoom = opts.zoom || 1;
   var sx = (opts.sx != null) ? opts.sx : 1;
   var shade = opts.shade || 0;
-  var s = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
-  var dw = img.naturalWidth * s, dh = img.naturalHeight * s;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(W / 2, H / 2);
   ctx.scale(sx, 1);
-  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  if (activeFit === 'blur') {
+    var bs = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+    var bw = img.naturalWidth * bs, bh = img.naturalHeight * bs;
+    ctx.drawImage(getBlurred(img), -bw / 2, -bh / 2, bw, bh);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
+    var fs = Math.min(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+    ctx.drawImage(img, -img.naturalWidth * fs / 2, -img.naturalHeight * fs / 2,
+      img.naturalWidth * fs, img.naturalHeight * fs);
+  } else {
+    var s = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+    var dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  }
   ctx.restore();
   if (shade > 0) {
     var w2 = W * Math.abs(sx);
     ctx.fillStyle = 'rgba(0,0,0,' + shade.toFixed(3) + ')';
     ctx.fillRect((W - w2) / 2, 0, w2, H);
+  }
+}
+
+/* ===== Before/Afterラベル ===== */
+function roundRectPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// 左上に、白文字＋半透明の黒帯のラベルを描く
+function drawLabel(text) {
+  ctx.save();
+  ctx.font = 'bold 30px sans-serif';
+  var tw = ctx.measureText(text).width;
+  var bw = tw + 36, bh = 52, x = 26, y = 26;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  roundRectPath(x, y, bw, bh, 12);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + bw / 2, y + bh / 2 + 2);
+  ctx.restore();
+}
+
+/* ===== コラージュ（写真風カードを並べる） ===== */
+// 白フチ付きの写真カードを1枚描く。下のフチにラベルを書く。
+function drawCard(img, cx, cy, cw, ch, rotDeg, label, alpha, dy, scale) {
+  scale = scale || 1;
+  var pad = 14, padB = 58;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy + (dy || 0));
+  ctx.rotate(rotDeg * Math.PI / 180);
+  ctx.scale(scale, scale);
+  // 影
+  ctx.fillStyle = 'rgba(70,50,40,0.28)';
+  ctx.fillRect(-cw / 2 - pad + 9, -ch / 2 - pad + 13, cw + pad * 2, ch + pad + padB);
+  // 白フチ
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(-cw / 2 - pad, -ch / 2 - pad, cw + pad * 2, ch + pad + padB);
+  // 写真（カードの形にトリミング）
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-cw / 2, -ch / 2, cw, ch);
+  ctx.clip();
+  var s = Math.max(cw / img.naturalWidth, ch / img.naturalHeight);
+  ctx.drawImage(img, -img.naturalWidth * s / 2, -img.naturalHeight * s / 2,
+    img.naturalWidth * s, img.naturalHeight * s);
+  ctx.restore();
+  // ラベル
+  ctx.fillStyle = '#666';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, 0, ch / 2 + padB / 2 + 6);
+  ctx.restore();
+}
+
+function drawCollage(t) {
+  ctx.fillStyle = '#f3ece5';
+  ctx.fillRect(0, 0, W, H);
+  var cw = 400, ch = 520;
+  // 両方出そろったあとは、全体がゆっくり育つ（寄る）
+  var grow = 1;
+  if (t > T3 + T_TRANS) {
+    grow = 1 + 0.025 * easeInOut(Math.min(1, (t - T3 - T_TRANS) / T_AFTER));
+  }
+  drawCard(imgBefore, 280, 500, cw, ch, -4, 'Before', 1, 0, grow);
+  if (t >= T3) {
+    var p = Math.min(1, (t - T3) / T_TRANS);
+    var pe = easeInOut(p);
+    drawCard(imgAfter, 450, 830, cw, ch, 3 + (1 - pe) * 8, 'After', pe, (1 - pe) * 200, grow);
   }
 }
 
@@ -247,28 +367,41 @@ function drawFrame(t, pattern) {
     ctx.fillText('写真を2枚選んでください', W / 2, H / 2);
     return;
   }
-  if (t < T1) {
-    // 冒頭：afterチラ見せ（わずかに寄る）
-    drawCover(imgAfter, { zoom: 1 + 0.03 * (t / T1) });
+  if (pattern === 'collage') {
+    drawCollage(t);
     return;
   }
-  if (t < T3) {
+  var label = null;
+  if (t < T1) {
+    // 冒頭：afterチラ見せ（イージングで緩やかに寄る）
+    drawCover(imgAfter, { zoom: 1 + 0.03 * easeInOut(t / T1) });
+    label = 'After';
+  } else if (t < T3) {
     // before表示＋「間」
     drawCover(imgBefore);
-    return;
+    label = 'Before';
+  } else {
+    var td = transDur(pattern);
+    if (td > 0 && t < T3 + td) {
+      var p = easeInOut((t - T3) / td);
+      if (pattern === 'wipe') drawWipe(p);
+      else if (pattern === 'fadezoom') drawFadeZoom(p);
+      else if (pattern === 'flip') drawFlip(p);
+      else if (pattern === 'page') drawPage(p);
+      else drawCover(imgAfter);
+      label = p < 0.5 ? 'Before' : 'After';
+    } else {
+      // after表示（フェード＋ズームはゆっくり寄り続ける）
+      if (pattern === 'fadezoom') {
+        var ap = Math.min(1, (t - T3 - td) / T_AFTER);
+        drawCover(imgAfter, { zoom: 1.07 + 0.03 * easeInOut(ap) });
+      } else {
+        drawCover(imgAfter);
+      }
+      label = 'After';
+    }
   }
-  var td = transDur(pattern);
-  if (td > 0 && t < T3 + td) {
-    var p = ease((t - T3) / td);
-    if (pattern === 'wipe') drawWipe(p);
-    else if (pattern === 'fadezoom') drawFadeZoom(p);
-    else if (pattern === 'flip') drawFlip(p);
-    else if (pattern === 'page') drawPage(p);
-    else drawCover(imgAfter);
-    return;
-  }
-  // after表示
-  drawCover(imgAfter, pattern === 'fadezoom' ? { zoom: 1.07 } : null);
+  if (label) drawLabel(label);
 }
 
 /* ===== 音楽（WebAudioで生成する簡易ループ） ===== */
@@ -441,7 +574,10 @@ function loadImage(src) {
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
-function refreshStage() { drawFrame(0, selected('pattern') || 'cut'); }
+function refreshStage() {
+  activeFit = selected('fit') || 'cover';
+  drawFrame(0, selected('pattern') || 'cut');
+}
 
 function bindFile(inputId, thumbId, isBefore) {
   document.getElementById(inputId).addEventListener('change', function (ev) {
@@ -472,6 +608,7 @@ document.getElementById('sampleBtn').addEventListener('click', function () {
 });
 
 document.getElementById('patternChoices').addEventListener('change', refreshStage);
+document.getElementById('fitChoices').addEventListener('change', refreshStage);
 
 /* ===== 動画生成 ===== */
 function pickMime() {
@@ -499,6 +636,7 @@ document.getElementById('makeBtn').addEventListener('click', function () {
   btn.disabled = true;
   var pattern = selected('pattern') || 'cut';
   var music = selected('music') || 'none';
+  activeFit = selected('fit') || 'cover';
 
   if (music === 'file' && !userAudioBuffer) {
     setStatus(userAudioDecoding
