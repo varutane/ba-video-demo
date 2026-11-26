@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ビフォーアフター動画メーカー（試作）</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    margin: 0; padding: 16px; background: #faf7f4; color: #333;
+    max-width: 560px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  .sub { color: #777; font-size: 13px; margin: 0 0 16px; }
+  section {
+    background: #fff; border: 1px solid #e7ded6; border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 14px;
+  }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .photos { display: flex; gap: 12px; }
+  .photo-box { flex: 1; }
+  .photo-box .thumb {
+    width: 100%; aspect-ratio: 9 / 12; object-fit: cover;
+    background: #eee; border-radius: 8px; display: block; margin-bottom: 8px;
+  }
+  .photo-box label.file {
+    display: block; text-align: center; background: #f3ece5; border: 1px solid #ddd0c2;
+    border-radius: 8px; padding: 8px 4px; font-size: 14px; cursor: pointer;
+  }
+  .photo-box input[type="file"] { display: none; }
+  .sample-btn {
+    margin-top: 12px; width: 100%; padding: 9px; font-size: 14px;
+    background: #fff; border: 1px solid #ccc; border-radius: 8px; cursor: pointer;
+  }
+  .choices label {
+    display: block; padding: 7px 8px; border-radius: 8px; font-size: 15px; cursor: pointer;
+  }
+  .choices label:hover { background: #faf3ec; }
+  .choices input { margin-right: 8px; }
+  #makeBtn {
+    width: 100%; padding: 16px; font-size: 18px; font-weight: bold;
+    background: #e2603f; color: #fff; border: none; border-radius: 12px; cursor: pointer;
+  }
+  #makeBtn:disabled { background: #cbb; cursor: wait; }
+  #status { text-align: center; color: #666; min-height: 1.4em; font-size: 14px; }
+  .stage { text-align: center; }
+  canvas {
+    width: min(78vw, 300px); height: auto; background: #111;
+    border-radius: 10px;
+  }
+  #preview {
+    width: min(78vw, 300px); border-radius: 10px; display: none; margin: 10px auto 0;
+  }
+  #dl {
+    display: none; margin: 12px auto 0; width: fit-content;
+    background: #2e7d4f; color: #fff; text-decoration: none;
+    padding: 12px 22px; border-radius: 10px; font-size: 16px; font-weight: bold;
+  }
+  .note { font-size: 12px; color: #999; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>ビフォーアフター動画メーカー</h1>
+<p class="sub">写真を2枚入れるだけで、Instagram用の動画（約9秒・縦型）ができます。試作版です。</p>
+
+<section>
+  <h2>1. 写真</h2>
+  <div class="photos">
+    <div class="photo-box">
+      <img class="thumb" id="thumbBefore" alt="ビフォー写真">
+      <label class="file">まえの写真を選ぶ
+        <input type="file" id="fileBefore" accept="image/*">
+      </label>
+    </div>
+    <div class="photo-box">
+      <img class="thumb" id="thumbAfter" alt="アフター写真">
+      <label class="file">あとの写真を選ぶ
+        <input type="file" id="fileAfter" accept="image/*">
+      </label>
+    </div>
+  </div>
+  <button class="sample-btn" id="sampleBtn" type="button">サンプルで試す</button>
+</section>
+
+<section>
+  <h2>2. 動き</h2>
+  <div class="choices" id="patternChoices">
+    <label><input type="radio" name="pattern" value="cut" checked>カット（パッと切り替わる）</label>
+    <label><input type="radio" name="pattern" value="wipe">ワイプ（左から開く）</label>
+    <label><input type="radio" name="pattern" value="fadezoom">フェード＋ズーム（溶けながら寄る）</label>
+    <label><input type="radio" name="pattern" value="flip">カードめくり（ひっくり返る）</label>
+    <label><input type="radio" name="pattern" value="page">ページ捲り（ページをめくる感じ）</label>
+  </div>
+</section>
+
+<section>
+  <h2>3. 音楽</h2>
+  <div class="choices" id="musicChoices">
+    <label><input type="radio" name="music" value="pop" checked>あかるいポップ</label>
+    <label><input type="radio" name="music" value="chill">おちついたチル</label>
+    <label><input type="radio" name="music" value="up">元気なアップテンポ</label>
+    <label><input type="radio" name="music" value="none">音楽なし</label>
+  </div>
+</section>
+
+<button id="makeBtn" type="button">動画にする</button>
+<p id="status"></p>
+
+<section class="stage">
+  <canvas id="cv" width="720" height="1280"></canvas>
+  <video id="preview" controls playsinline></video>
+  <a id="dl" href="#" download="before-after.webm">動画をダウンロード</a>
+</section>
+
+<p class="note">※ 動画を作っている間（約9秒）は、そのままお待ちください。Chrome推奨です。</p>
+
+<script>
+'use strict';
+
+/* ===== 基本設定 ===== */
+var W = 720, H = 1280;
+var T_TEASE = 1.2;   // 冒頭：afterチラ見せ
+var T_BEFORE = 2.5;  // before表示
+var T_PAUSE = 0.5;   // 「間」（before静止）
+var T_TRANS = 0.6;   // 切り替え
+var T_AFTER = 4.0;   // after表示
+var T1 = T_TEASE;                 // 1.2
+var T2 = T1 + T_BEFORE;           // 3.7
+var T3 = T2 + T_PAUSE;            // 4.2（切り替え開始）
+var TOTAL = T3 + T_TRANS + T_AFTER; // 8.8
+
+var cv = document.getElementById('cv');
+var ctx = cv.getContext('2d');
+var imgBefore = null, imgAfter = null;
+
+function selected(name) {
+  var el = document.querySelector('input[name="' + name + '"]:checked');
+  return el ? el.value : null;
+}
+function transDur(pattern) { return pattern === 'cut' ? 0 : T_TRANS; }
+function ease(p) { return p * p * (3 - 2 * p); }
+
+/* ===== 描画 ===== */
+// 写真を画面いっぱいに（中央トリミング）描く。
+// opts: alpha / zoom / sx（横方向の潰れ：カードめくり用）/ shade（影）
+function drawCover(img, opts) {
+  opts = opts || {};
+  var alpha = (opts.alpha != null) ? opts.alpha : 1;
+  var zoom = opts.zoom || 1;
+  var sx = (opts.sx != null) ? opts.sx : 1;
+  var shade = opts.shade || 0;
+  var s = Math.max(W / img.naturalWidth, H / img.naturalHeight) * zoom;
+  var dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(W / 2, H / 2);
+  ctx.scale(sx, 1);
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+  if (shade > 0) {
+    var w2 = W * Math.abs(sx);
+    ctx.fillStyle = 'rgba(0,0,0,' + shade.toFixed(3) + ')';
+    ctx.fillRect((W - w2) / 2, 0, w2, H);
+  }
+}
+
+function drawWipe(p) {
+  drawCover(imgBefore);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, W * p, H);
+  ctx.clip();
+  drawCover(imgAfter);
+  ctx.restore();
+  // 境目の光
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillRect(W * p - 2, 0, 3, H);
+}
+
+function drawFadeZoom(p) {
+  drawCover(imgBefore);
+  drawCover(imgAfter, { alpha: p, zoom: 1 + 0.07 * p });
+}
+
+function drawFlip(p) {
+  var th = p * Math.PI;
+  var shade = Math.sin(th) * 0.35;
+  if (p < 0.5) {
+    drawCover(imgBefore, { sx: Math.cos(th), shade: shade });
+  } else {
+    drawCover(imgAfter, { sx: Math.abs(Math.cos(th)), shade: shade });
+  }
+}
+
+function drawPage(p) {
+  drawCover(imgAfter); // 下にafter
+  var S = 170; // 斜めの傾き
+  var xt = (W + S) * (1 - p); // 上辺での境目x
+  var xb = xt - S;            // 下辺での境目x
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(xt, 0);
+  ctx.lineTo(xb, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.clip();
+  drawCover(imgBefore);
+  ctx.restore();
+  // 捲れの影（境目付近に帯状グラデーション）
+  var a = Math.sin(p * Math.PI) * 0.8;
+  if (a > 0.01) {
+    var g = ctx.createLinearGradient(xb - 70, 0, xt + 40, 0);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.45, 'rgba(0,0,0,' + (0.40 * a).toFixed(3) + ')');
+    g.addColorStop(0.62, 'rgba(255,255,255,' + (0.28 * a).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(Math.max(0, xb - 70), 0, (xt + 40) - Math.max(0, xb - 70), H);
+  }
+}
+
+function drawFrame(t, pattern) {
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+  if (!imgBefore || !imgAfter) {
+    ctx.fillStyle = '#bbb';
+    ctx.font = '34px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('写真を2枚選んでください', W / 2, H / 2);
+    return;
+  }
+  if (t < T1) {
+    // 冒頭：afterチラ見せ（わずかに寄る）
+    drawCover(imgAfter, { zoom: 1 + 0.03 * (t / T1) });
+    return;
+  }
+  if (t < T3) {
+    // before表示＋「間」
+    drawCover(imgBefore);
+    return;
+  }
+  var td = transDur(pattern);
+  if (td > 0 && t < T3 + td) {
+    var p = ease((t - T3) / td);
+    if (pattern === 'wipe') drawWipe(p);
+    else if (pattern === 'fadezoom') drawFadeZoom(p);
+    else if (pattern === 'flip') drawFlip(p);
+    else if (pattern === 'page') drawPage(p);
+    else drawCover(imgAfter);
+    return;
+  }
+  // after表示
+  drawCover(imgAfter, pattern === 'fadezoom' ? { zoom: 1.07 } : null);
+}
+
+/* ===== 音楽（WebAudioで生成する簡易ループ） ===== */
+// chords: 1小節ごとの { r: ベース音(midi), t: 和音(midi配列) }
+var TRACKS = {
+  pop: {
+    bpm: 120, kick: true,
+    chords: [
+      { r: 48, t: [60, 64, 67] },  // C
+      { r: 43, t: [59, 62, 67] },  // G
+      { r: 45, t: [57, 60, 64] },  // Am
+      { r: 41, t: [57, 60, 65] }   // F
+    ],
+    bassBeats: [0, 1, 2, 3],
+    pluck: [3, 4, 5, 4, 3, 4, 2, 4]
+  },
+  chill: {
+    bpm: 84, kick: false,
+    chords: [
+      { r: 50, t: [62, 65, 69, 72] },  // Dm7
+      { r: 43, t: [59, 62, 65] },      // G7
+      { r: 48, t: [59, 64, 67] },      // Cmaj7
+      { r: 45, t: [60, 64, 67] }       // Am7
+    ],
+    bassBeats: [0, 2],
+    pluck: [3, -1, 4, -1, 2, -1, -1, -1]
+  },
+  up: {
+    bpm: 136, kick: true,
+    chords: [
+      { r: 45, t: [57, 60, 64] },  // Am
+      { r: 41, t: [57, 60, 65] },  // F
+      { r: 48, t: [55, 60, 64] },  // C
+      { r: 43, t: [55, 59, 62] }   // G
+    ],
+    bassBeats: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
+    pluck: [5, 4, 3, 4, 5, 4, 3, 4]
+  }
+};
+
+function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+function tone(ac, dest, o) {
+  var osc = ac.createOscillator();
+  var g = ac.createGain();
+  osc.type = o.type || 'triangle';
+  osc.frequency.setValueAtTime(o.freq, o.t);
+  if (o.slideTo) {
+    osc.frequency.exponentialRampToValueAtTime(o.slideTo, o.t + Math.min(0.12, o.dur));
+  }
+  var atk = (o.attack != null) ? o.attack : 0.02;
+  g.gain.setValueAtTime(0.0001, o.t);
+  g.gain.linearRampToValueAtTime(o.vol, o.t + atk);
+  g.gain.setValueAtTime(o.vol, o.t + Math.max(atk, o.dur - 0.06));
+  g.gain.linearRampToValueAtTime(0.0001, o.t + o.dur);
+  osc.connect(g);
+  g.connect(dest);
+  osc.start(o.t);
+  osc.stop(o.t + o.dur + 0.05);
+}
+
+function scheduleTrack(ac, dest, key, startAt, dur) {
+  var tr = TRACKS[key];
+  if (!tr) return;
+  var spb = 60 / tr.bpm;      // 1拍の秒数
+  var bar = spb * 4;          // 1小節
+  var nBars = Math.ceil(dur / bar);
+  for (var b = 0; b < nBars; b++) {
+    var t0 = startAt + b * bar;
+    if (t0 >= startAt + dur) break;
+    var ch = tr.chords[b % tr.chords.length];
+    var remain = Math.min(bar, startAt + dur - t0);
+    var i, m;
+    // パッド（和音）
+    for (i = 0; i < ch.t.length; i++) {
+      tone(ac, dest, { type: 'triangle', freq: mtof(ch.t[i]), t: t0, dur: remain, vol: 0.045, attack: 0.12 });
+    }
+    // ベース
+    for (i = 0; i < tr.bassBeats.length; i++) {
+      var bt = t0 + tr.bassBeats[i] * spb;
+      if (bt < startAt + dur) {
+        tone(ac, dest, { type: 'sine', freq: mtof(ch.r - 12), t: bt, dur: spb * 0.9, vol: 0.16 });
+      }
+    }
+    // プラック（メロディ）
+    var pool = ch.t.concat(ch.t.map(function (n) { return n + 12; }));
+    var eighth = spb / 2;
+    for (i = 0; i < tr.pluck.length; i++) {
+      var idx = tr.pluck[i];
+      if (idx < 0) continue;
+      var pt = t0 + i * eighth;
+      if (pt < startAt + dur) {
+        tone(ac, dest, { type: 'triangle', freq: mtof(pool[idx % pool.length]), t: pt, dur: eighth * 0.9, vol: 0.07 });
+      }
+    }
+    // キック
+    if (tr.kick) {
+      for (i = 0; i < 4; i++) {
+        var kt = t0 + i * spb;
+        if (kt < startAt + dur) {
+          tone(ac, dest, { type: 'sine', freq: 120, slideTo: 45, t: kt, dur: 0.18, vol: 0.32 });
+        }
+      }
+    }
+  }
+}
+
+/* ===== 写真の読み込み ===== */
+function loadImage(src) {
+  return new Promise(function (resolve, reject) {
+    var i = new Image();
+    i.onload = function () { resolve(i); };
+    i.onerror = reject;
+    i.src = src;
+  });
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+function refreshStage() { drawFrame(0, selected('pattern') || 'cut'); }
+
+function bindFile(inputId, thumbId, isBefore) {
+  document.getElementById(inputId).addEventListener('change', function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    var url = URL.createObjectURL(f);
+    loadImage(url).then(function (img) {
+      if (isBefore) imgBefore = img; else imgAfter = img;
+      document.getElementById(thumbId).src = url;
+      refreshStage();
+    }).catch(function () { setStatus('写真を読み込めませんでした。'); });
+  });
+}
+bindFile('fileBefore', 'thumbBefore', true);
+bindFile('fileAfter', 'thumbAfter', false);
+
+document.getElementById('sampleBtn').addEventListener('click', function () {
+  Promise.all([loadImage('samples/before.png'), loadImage('samples/after.jpg')])
+    .then(function (imgs) {
+      imgBefore = imgs[0];
+      imgAfter = imgs[1];
+      document.getElementById('thumbBefore').src = 'samples/before.png';
+      document.getElementById('thumbAfter').src = 'samples/after.jpg';
+      refreshStage();
+      setStatus('サンプルの写真を入れました。');
+    })
+    .catch(function () { setStatus('サンプルを読み込めませんでした。'); });
+});
+
+document.getElementById('patternChoices').addEventListener('change', refreshStage);
+
+/* ===== 動画生成 ===== */
+function pickMime() {
+  var cands = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+    'video/mp4'
+  ];
+  for (var i = 0; i < cands.length; i++) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(cands[i])) return cands[i];
+  }
+  return '';
+}
+
+var making = false;
+document.getElementById('makeBtn').addEventListener('click', function () {
+  if (making) return;
+  if (!imgBefore || !imgAfter) {
+    setStatus('写真を2枚選んでください（サンプルでもOKです）。');
+    return;
+  }
+  making = true;
+  var btn = document.getElementById('makeBtn');
+  btn.disabled = true;
+  var pattern = selected('pattern') || 'cut';
+  var music = selected('music') || 'none';
+
+  var ac = null;
+  var stream = cv.captureStream(30);
+  if (music !== 'none') {
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      var comp = ac.createDynamicsCompressor();
+      var mediaDest = ac.createMediaStreamDestination();
+      comp.connect(mediaDest);
+      comp.connect(ac.destination); // 生成中にも聞こえるように
+      scheduleTrack(ac, comp, music, ac.currentTime + 0.1, TOTAL);
+      mediaDest.stream.getAudioTracks().forEach(function (tr) { stream.addTrack(tr); });
+    } catch (e) {
+      ac = null; // 音声が作れなくても動画は続行
+    }
+  }
+
+  var mime = pickMime();
+  var rec;
+  try {
+    rec = mime
+      ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 })
+      : new MediaRecorder(stream, { videoBitsPerSecond: 8000000 });
+  } catch (e) {
+    setStatus('このブラウザでは動画を作れませんでした。Chromeでお試しください。');
+    btn.disabled = false;
+    making = false;
+    if (ac) ac.close();
+    return;
+  }
+  var chunks = [];
+  rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+  var stopped = new Promise(function (res) { rec.onstop = res; });
+
+  rec.start(200);
+  var t0 = performance.now();
+  function frame() {
+    var el = (performance.now() - t0) / 1000;
+    if (el >= TOTAL) {
+      drawFrame(TOTAL - 0.001, pattern);
+      rec.stop();
+      return;
+    }
+    drawFrame(el, pattern);
+    setStatus('動画をつくっています… ' + Math.min(100, Math.round(el / TOTAL * 100)) + '%');
+    requestAnimationFrame(frame);
+  }
+  frame();
+
+  stopped.then(function () {
+    if (ac) { try { ac.close(); } catch (e) {} }
+    var type = rec.mimeType || 'video/webm';
+    var blob = new Blob(chunks, { type: type });
+    var url = URL.createObjectURL(blob);
+    var pv = document.getElementById('preview');
+    pv.src = url;
+    pv.style.display = 'block';
+    var dl = document.getElementById('dl');
+    dl.href = url;
+    dl.download = type.indexOf('mp4') >= 0 ? 'before-after.mp4' : 'before-after.webm';
+    dl.style.display = 'block';
+    setStatus('できました。下で確認して、ダウンロードしてください。');
+    btn.disabled = false;
+    making = false;
+  });
+});
+
+refreshStage();
+</script>
+</body>
+</html>
