@@ -59,6 +59,13 @@
     padding: 12px 22px; border-radius: 10px; font-size: 16px; font-weight: bold;
   }
   .note { font-size: 12px; color: #999; text-align: center; }
+  #audioFileBox { display: none; padding: 4px 8px 2px; }
+  #audioFileBox label.file {
+    display: block; text-align: center; background: #f3ece5; border: 1px solid #ddd0c2;
+    border-radius: 8px; padding: 8px 4px; font-size: 14px; cursor: pointer;
+  }
+  #audioFileBox input[type="file"] { display: none; }
+  #audioFileName { font-size: 13px; color: #666; margin: 6px 0 0; }
 </style>
 </head>
 <body>
@@ -102,7 +109,14 @@
     <label><input type="radio" name="music" value="pop" checked>あかるいポップ</label>
     <label><input type="radio" name="music" value="chill">おちついたチル</label>
     <label><input type="radio" name="music" value="up">元気なアップテンポ</label>
+    <label><input type="radio" name="music" value="file">自分の音源ファイル</label>
     <label><input type="radio" name="music" value="none">音楽なし</label>
+  </div>
+  <div id="audioFileBox">
+    <label class="file">音源ファイルを選ぶ（mp3など）
+      <input type="file" id="fileAudio" accept="audio/*">
+    </label>
+    <p id="audioFileName"></p>
   </div>
 </section>
 
@@ -362,6 +376,59 @@ function scheduleTrack(ac, dest, key, startAt, dur) {
   }
 }
 
+/* ===== 利用者の音源ファイル ===== */
+var userAudioBuffer = null;
+var userAudioDecoding = false;
+
+// デコード済みの音源を、動画の長さに合わせて流す。
+// 短い音源はループ、長い音源は先頭から使って最後の0.5秒でフェードアウト。
+function scheduleUserAudio(ac, dest, buffer, startAt, dur) {
+  var src = ac.createBufferSource();
+  src.buffer = buffer;
+  var g = ac.createGain();
+  g.gain.setValueAtTime(1, startAt);
+  if (buffer.duration < dur) {
+    src.loop = true;
+  } else {
+    g.gain.setValueAtTime(1, startAt + dur - 0.5);
+    g.gain.linearRampToValueAtTime(0.0001, startAt + dur);
+  }
+  src.connect(g);
+  g.connect(dest);
+  src.start(startAt, 0);
+  src.stop(startAt + dur + 0.05);
+}
+
+document.getElementById('musicChoices').addEventListener('change', function () {
+  var isFile = selected('music') === 'file';
+  document.getElementById('audioFileBox').style.display = isFile ? 'block' : 'none';
+});
+
+document.getElementById('fileAudio').addEventListener('change', function (ev) {
+  var f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  document.getElementById('audioFileName').textContent = f.name;
+  userAudioBuffer = null;
+  userAudioDecoding = true;
+  setStatus('音源を読み込んでいます…');
+  f.arrayBuffer().then(function (ab) {
+    var dctx = new (window.AudioContext || window.webkitAudioContext)();
+    return dctx.decodeAudioData(ab).then(function (buf) {
+      userAudioBuffer = buf;
+      try { dctx.close(); } catch (e) {}
+    }, function (err) {
+      try { dctx.close(); } catch (e) {}
+      throw err;
+    });
+  }).then(function () {
+    userAudioDecoding = false;
+    setStatus('音源の準備ができました。');
+  }).catch(function () {
+    userAudioDecoding = false;
+    setStatus('音源を読み込めませんでした。別のファイルをお試しください。');
+  });
+});
+
 /* ===== 写真の読み込み ===== */
 function loadImage(src) {
   return new Promise(function (resolve, reject) {
@@ -433,6 +500,15 @@ document.getElementById('makeBtn').addEventListener('click', function () {
   var pattern = selected('pattern') || 'cut';
   var music = selected('music') || 'none';
 
+  if (music === 'file' && !userAudioBuffer) {
+    setStatus(userAudioDecoding
+      ? '音源を読み込んでいます。少し待ってから、もう一度押してください。'
+      : '音源ファイルを選んでください。');
+    btn.disabled = false;
+    making = false;
+    return;
+  }
+
   var ac = null;
   var stream = cv.captureStream(30);
   if (music !== 'none') {
@@ -442,7 +518,11 @@ document.getElementById('makeBtn').addEventListener('click', function () {
       var mediaDest = ac.createMediaStreamDestination();
       comp.connect(mediaDest);
       comp.connect(ac.destination); // 生成中にも聞こえるように
-      scheduleTrack(ac, comp, music, ac.currentTime + 0.1, TOTAL);
+      if (music === 'file') {
+        scheduleUserAudio(ac, comp, userAudioBuffer, ac.currentTime + 0.1, TOTAL);
+      } else {
+        scheduleTrack(ac, comp, music, ac.currentTime + 0.1, TOTAL);
+      }
       mediaDest.stream.getAudioTracks().forEach(function (tr) { stream.addTrack(tr); });
     } catch (e) {
       ac = null; // 音声が作れなくても動画は続行
