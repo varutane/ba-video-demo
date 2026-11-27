@@ -759,31 +759,33 @@ var userAudioBuffer = null;
 var userAudioDecoding = false;
 
 // デコード済みの音源を、動画の長さに合わせて流す。
-// 短い音源はループ、長い音源は先頭から使って最後の0.5秒でフェードアウト。
-function scheduleUserAudio(ac, dest, buffer, startAt, dur) {
+// 短い音源はループ、長い音源は offset から使って最後の1.2秒でフェードアウト。
+function scheduleUserAudio(ac, dest, buffer, startAt, dur, offset) {
+  var off = offset || 0;
   var src = ac.createBufferSource();
   src.buffer = buffer;
   var g = ac.createGain();
   g.gain.setValueAtTime(1, startAt);
-  if (buffer.duration < dur) {
+  if (buffer.duration - off < dur) {
     src.loop = true;
   } else {
-    g.gain.setValueAtTime(1, startAt + dur - 0.5);
+    g.gain.setValueAtTime(1, startAt + dur - 1.2);
     g.gain.linearRampToValueAtTime(0.0001, startAt + dur);
   }
   src.connect(g);
   g.connect(dest);
-  src.start(startAt, 0);
+  src.start(startAt, off);
   src.stop(startAt + dur + 0.05);
 }
 
 /* ===== 組み込み楽曲（Suno生成・Aテイク） ===== */
+// offset＝音ハメ用の開始位置（切り替えと終わりにアクセントが合うよう解析で選定）
 var SUNO_TRACKS = {
-  suno1: 'audio/fresh-finish-a.mp3',
-  suno2: 'audio/salon-cafe-a.mp3',
-  suno3: 'audio/city-gloss-a.mp3',
-  suno4: 'audio/quiet-elegance-a.mp3',
-  suno5: 'audio/soft-reset-a.mp3'
+  suno1: { src: 'audio/fresh-finish-a.mp3', offset: 1.40 },
+  suno2: { src: 'audio/salon-cafe-a.mp3', offset: 62.09 },
+  suno3: { src: 'audio/city-gloss-a.mp3', offset: 42.99 },
+  suno4: { src: 'audio/quiet-elegance-a.mp3', offset: 64.54 },
+  suno5: { src: 'audio/soft-reset-a.mp3', offset: 37.62 }
 };
 var sunoBuffers = {};
 var sunoDecoding = {};
@@ -791,7 +793,7 @@ var sunoDecoding = {};
 function loadSuno(key) {
   if (!SUNO_TRACKS[key] || sunoBuffers[key] || sunoDecoding[key]) return;
   sunoDecoding[key] = true;
-  fetch(SUNO_TRACKS[key]).then(function (r) { return r.arrayBuffer(); })
+  fetch(SUNO_TRACKS[key].src).then(function (r) { return r.arrayBuffer(); })
     .then(function (ab) {
       var dctx = new (window.AudioContext || window.webkitAudioContext)();
       return dctx.decodeAudioData(ab).then(function (buf) {
@@ -967,7 +969,7 @@ document.getElementById('makeBtn').addEventListener('click', function () {
       if (music === 'file') {
         scheduleUserAudio(ac, comp, userAudioBuffer, ac.currentTime + 0.1, TOTAL);
       } else if (SUNO_TRACKS[music]) {
-        scheduleUserAudio(ac, comp, sunoBuffers[music], ac.currentTime + 0.1, TOTAL);
+        scheduleUserAudio(ac, comp, sunoBuffers[music], ac.currentTime + 0.1, TOTAL, SUNO_TRACKS[music].offset);
       } else {
         scheduleTrack(ac, comp, music, ac.currentTime + 0.1, TOTAL);
       }
