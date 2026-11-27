@@ -66,6 +66,16 @@
   }
   #audioFileBox input[type="file"] { display: none; }
   #audioFileName { font-size: 13px; color: #666; margin: 6px 0 0; }
+  #salonName {
+    width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px;
+    border: 1px solid #ddd0c2; border-radius: 8px; background: #fff; margin-bottom: 10px;
+  }
+  #logoBox label.file {
+    display: block; text-align: center; background: #f3ece5; border: 1px solid #ddd0c2;
+    border-radius: 8px; padding: 8px 4px; font-size: 14px; cursor: pointer;
+  }
+  #logoBox input[type="file"] { display: none; }
+  #logoThumb { display: none; max-width: 180px; max-height: 64px; margin: 8px auto 0; }
 </style>
 </head>
 <body>
@@ -93,14 +103,26 @@
 </section>
 
 <section>
+  <h2>お店の名前（任意）</h2>
+  <input type="text" id="salonName" placeholder="サロン名（動画の上の方に表示されます）">
+  <div id="logoBox">
+    <label class="file">ロゴ画像を使う（任意）
+      <input type="file" id="fileLogo" accept="image/*">
+    </label>
+    <img id="logoThumb" alt="ロゴ">
+  </div>
+  <p class="note">ロゴ画像がある場合は、名前の代わりにロゴが表示されます（コラージュのとき）。</p>
+</section>
+
+<section>
   <h2>2. 動き</h2>
   <div class="choices" id="patternChoices">
-    <label><input type="radio" name="pattern" value="cut" checked>カット（パッと切り替わる）</label>
+    <label><input type="radio" name="pattern" value="collage" checked>コラージュ（2枚を並べて見せる・標準）</label>
+    <label><input type="radio" name="pattern" value="cut">カット（パッと切り替わる）</label>
     <label><input type="radio" name="pattern" value="wipe">ワイプ（左から開く）</label>
     <label><input type="radio" name="pattern" value="fadezoom">フェード＋ズーム（溶けながら寄る）</label>
     <label><input type="radio" name="pattern" value="flip">カードめくり（ひっくり返る）</label>
     <label><input type="radio" name="pattern" value="page">ページ捲り（ページをめくる感じ）</label>
-    <label><input type="radio" name="pattern" value="collage">コラージュ（2枚を並べて見せる）</label>
   </div>
   <h2 style="margin-top:14px;">写真の見せ方</h2>
   <div class="choices" id="fitChoices">
@@ -155,6 +177,7 @@ var TOTAL = T3 + T_TRANS + T_AFTER; // 8.8
 var cv = document.getElementById('cv');
 var ctx = cv.getContext('2d');
 var imgBefore = null, imgAfter = null;
+var salonName = '', imgLogo = null;
 
 function selected(name) {
   var el = document.querySelector('input[name="' + name + '"]:checked');
@@ -252,12 +275,12 @@ function drawLabel(text) {
 
 /* ===== コラージュ（写真風カードを並べる） ===== */
 // 白フチ付きの写真カードを1枚描く。下のフチにラベルを書く。
-function drawCard(img, cx, cy, cw, ch, rotDeg, label, alpha, dy, scale) {
+function drawCard(img, cx, cy, cw, ch, rotDeg, label, alpha, dy, scale, dx) {
   scale = scale || 1;
   var pad = 14, padB = 58;
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.translate(cx, cy + (dy || 0));
+  ctx.translate(cx + (dx || 0), cy + (dy || 0));
   ctx.rotate(rotDeg * Math.PI / 180);
   ctx.scale(scale, scale);
   // 影
@@ -284,20 +307,58 @@ function drawCard(img, cx, cy, cw, ch, rotDeg, label, alpha, dy, scale) {
   ctx.restore();
 }
 
+var T_ENTER = 0.85; // コラージュ：カードの登場にかける時間
+
+// 行き過ぎてから収まるイージング（置いた感じを出す）
+function easeOutBack(p) {
+  p = Math.max(0, Math.min(1, p));
+  var c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2);
+}
+function lerp(a, b, p) { return a + (b - a) * p; }
+
+// 台紙の上の方に、サロン名かロゴを描く
+function drawSalonBrand(t) {
+  var a = Math.min(1, t / 0.6);
+  if (a <= 0 || (!imgLogo && !salonName)) return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  if (imgLogo) {
+    var s = Math.min(320 / imgLogo.naturalWidth, 110 / imgLogo.naturalHeight);
+    var lw = imgLogo.naturalWidth * s, lh = imgLogo.naturalHeight * s;
+    ctx.drawImage(imgLogo, W / 2 - lw / 2, 128 - lh / 2, lw, lh);
+  } else {
+    ctx.fillStyle = '#7a6552';
+    ctx.font = '600 44px Georgia, "Hiragino Mincho ProN", serif';
+    try { ctx.letterSpacing = '4px'; } catch (e) {}
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(salonName, W / 2, 128);
+  }
+  ctx.restore();
+}
+
 function drawCollage(t) {
   ctx.fillStyle = '#f3ece5';
   ctx.fillRect(0, 0, W, H);
+  drawSalonBrand(t);
   var cw = 400, ch = 520;
   // 両方出そろったあとは、全体がゆっくり育つ（寄る）
   var grow = 1;
-  if (t > T3 + T_TRANS) {
-    grow = 1 + 0.025 * easeInOut(Math.min(1, (t - T3 - T_TRANS) / T_AFTER));
+  if (t > T3 + T_ENTER) {
+    grow = 1 + 0.025 * easeInOut(Math.min(1, (t - T3 - T_ENTER) / (TOTAL - T3 - T_ENTER)));
   }
-  drawCard(imgBefore, 280, 500, cw, ch, -4, 'Before', 1, 0, grow);
+  // Before：左上から回転しながら落ちてきて、所定の傾き（-4°）で止まる
+  var pb = easeOutBack(Math.min(1, t / T_ENTER));
+  drawCard(imgBefore, 280, 500, cw, ch,
+    lerp(-17, -4, pb), 'Before', Math.min(1, t / 0.35),
+    (1 - pb) * -150, (0.9 + 0.1 * pb) * grow, (1 - pb) * -60);
+  // After：右下から大きく回転しながら上がってきて、所定の傾き（3°）で止まる
   if (t >= T3) {
-    var p = Math.min(1, (t - T3) / T_TRANS);
-    var pe = easeInOut(p);
-    drawCard(imgAfter, 450, 830, cw, ch, 3 + (1 - pe) * 8, 'After', pe, (1 - pe) * 200, grow);
+    var pa = easeOutBack(Math.min(1, (t - T3) / T_ENTER));
+    drawCard(imgAfter, 450, 830, cw, ch,
+      lerp(21, 3, pa), 'After', Math.min(1, (t - T3) / 0.3),
+      (1 - pa) * 260, (0.9 + 0.1 * pa) * grow, (1 - pa) * 120);
   }
 }
 
@@ -576,7 +637,9 @@ function setStatus(msg) { document.getElementById('status').textContent = msg; }
 
 function refreshStage() {
   activeFit = selected('fit') || 'cover';
-  drawFrame(0, selected('pattern') || 'cut');
+  var pattern = selected('pattern') || 'cut';
+  // コラージュのプレビューは、カードが置き終わった状態を見せる
+  drawFrame(pattern === 'collage' ? TOTAL - 0.001 : 0, pattern);
 }
 
 function bindFile(inputId, thumbId, isBefore) {
@@ -609,6 +672,24 @@ document.getElementById('sampleBtn').addEventListener('click', function () {
 
 document.getElementById('patternChoices').addEventListener('change', refreshStage);
 document.getElementById('fitChoices').addEventListener('change', refreshStage);
+
+/* ===== サロン名・ロゴ ===== */
+document.getElementById('salonName').addEventListener('input', function (ev) {
+  salonName = ev.target.value.trim();
+  refreshStage();
+});
+document.getElementById('fileLogo').addEventListener('change', function (ev) {
+  var f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  var url = URL.createObjectURL(f);
+  loadImage(url).then(function (img) {
+    imgLogo = img;
+    var th = document.getElementById('logoThumb');
+    th.src = url;
+    th.style.display = 'block';
+    refreshStage();
+  }).catch(function () { setStatus('ロゴを読み込めませんでした。'); });
+});
 
 /* ===== 動画生成 ===== */
 function pickMime() {
