@@ -111,7 +111,7 @@
     </label>
     <img id="logoThumb" alt="ロゴ">
   </div>
-  <p class="note">ロゴ画像がある場合は、名前の代わりにロゴが表示されます（コラージュ／トランプのとき）。</p>
+  <p class="note">名前とロゴの両方がある場合は、組み合わせて表示されます（コラージュ／トランプのとき）。</p>
 </section>
 
 <section>
@@ -318,22 +318,29 @@ function easeOutBack(p) {
 }
 function lerp(a, b, p) { return a + (b - a) * p; }
 
-// 台紙の上の方に、サロン名かロゴを描く
+// 台紙の上の方に、サロン名とロゴを描く（両方あれば組み合わせ）
 function drawSalonBrand(t) {
   var a = Math.min(1, t / 0.6);
   if (a <= 0 || (!imgLogo && !salonName)) return;
   ctx.save();
   ctx.globalAlpha = a;
-  if (imgLogo) {
-    var s = Math.min(320 / imgLogo.naturalWidth, 110 / imgLogo.naturalHeight);
-    var lw = imgLogo.naturalWidth * s, lh = imgLogo.naturalHeight * s;
-    ctx.drawImage(imgLogo, W / 2 - lw / 2, 128 - lh / 2, lw, lh);
+  ctx.fillStyle = '#7a6552';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (imgLogo && salonName) {
+    var s1 = Math.min(200 / imgLogo.naturalWidth, 68 / imgLogo.naturalHeight);
+    ctx.drawImage(imgLogo, W / 2 - imgLogo.naturalWidth * s1 / 2, 92 - imgLogo.naturalHeight * s1 / 2,
+      imgLogo.naturalWidth * s1, imgLogo.naturalHeight * s1);
+    ctx.font = '600 34px Georgia, "Hiragino Mincho ProN", serif';
+    try { ctx.letterSpacing = '3px'; } catch (e) {}
+    ctx.fillText(salonName, W / 2, 156);
+  } else if (imgLogo) {
+    var s2 = Math.min(320 / imgLogo.naturalWidth, 110 / imgLogo.naturalHeight);
+    ctx.drawImage(imgLogo, W / 2 - imgLogo.naturalWidth * s2 / 2, 128 - imgLogo.naturalHeight * s2 / 2,
+      imgLogo.naturalWidth * s2, imgLogo.naturalHeight * s2);
   } else {
-    ctx.fillStyle = '#7a6552';
     ctx.font = '600 44px Georgia, "Hiragino Mincho ProN", serif';
     try { ctx.letterSpacing = '4px'; } catch (e) {}
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
     ctx.fillText(salonName, W / 2, 128);
   }
   ctx.restore();
@@ -449,7 +456,17 @@ function trumpBack() {
   ctx.lineWidth = 2;
   trumpRoundRect(-TRUMP_W / 2 + 18, -TRUMP_H / 2 + 18, TRUMP_W - 36, TRUMP_H - 36, 20);
   ctx.stroke();
-  if (imgLogo) {
+  if (imgLogo && salonName) {
+    var s3 = Math.min(260 / imgLogo.naturalWidth, 130 / imgLogo.naturalHeight);
+    ctx.drawImage(imgLogo, -imgLogo.naturalWidth * s3 / 2, -78 - imgLogo.naturalHeight * s3 / 2,
+      imgLogo.naturalWidth * s3, imgLogo.naturalHeight * s3);
+    ctx.fillStyle = '#7a6552';
+    ctx.font = '600 40px Georgia, "Hiragino Mincho ProN", serif';
+    try { ctx.letterSpacing = '3px'; } catch (e) {}
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(salonName, 0, 78);
+  } else if (imgLogo) {
     var s = Math.min(300 / imgLogo.naturalWidth, 150 / imgLogo.naturalHeight);
     ctx.drawImage(imgLogo, -imgLogo.naturalWidth * s / 2, -imgLogo.naturalHeight * s / 2,
       imgLogo.naturalWidth * s, imgLogo.naturalHeight * s);
