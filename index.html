@@ -373,9 +373,10 @@ function drawCollage(t) {
 }
 
 /* ===== トランプ（お店のカード） =====
-   裏＝お店のカード（名前・ロゴ）。めくれると表に上下Before/After
-   （下半分はトランプ式に逆さ）。カードが180°回ると上下が入れ替わり、
-   下だったAfterが上になって正向きになる。 */
+   裏＝お店のカード（名前・ロゴ）。めくれると表はBefore全面。
+   カードが180°回る途中で白フラッシュを挟んでAfterに入れ替わり、
+   Afterは逆さに描いてあるので回り切ると正向きになる。
+   （上下2分割は髪の長さが見えなくなるため不採用：2026-11-27 菜摘） */
 var TRUMP_W = 664, TRUMP_H = 1180;
 
 function trumpRoundRect(x, y, w, h, r) {
@@ -404,30 +405,21 @@ function trumpBase() {
   ctx.restore();
 }
 
-// カードの上半分を、斜めの区切りで描く。
-// 下半分は inverted=true で中心から180°回して同じ描き方をすると、
-// 斜め線がそのまま重なり、写真とラベルが逆さになって下に現れる。
-function trumpHalf(img, label, inverted) {
+// カード全面に写真を1枚描く。inverted=true のときは描画自体を180°回しておき、
+// カードが180°回転し終わった時点で正位置になる（After用）
+function trumpPhoto(img, label, inverted) {
   var pad = 14, iw = TRUMP_W - pad * 2, ih = TRUMP_H - pad * 2;
-  var topY = -TRUMP_H / 2 + pad, slant = 52, gap = 6;
-  function bY(x) { return -slant + 2 * slant * (x + iw / 2) / iw; }
+  var topY = -TRUMP_H / 2 + pad;
   ctx.save();
   if (inverted) ctx.rotate(Math.PI);
   ctx.save();
   trumpRoundRect(-iw / 2, topY, iw, ih, 14);
   ctx.clip();
-  ctx.beginPath();
-  ctx.moveTo(-iw / 2, topY);
-  ctx.lineTo(iw / 2, topY);
-  ctx.lineTo(iw / 2, bY(iw / 2) - gap);
-  ctx.lineTo(-iw / 2, bY(-iw / 2) - gap);
-  ctx.closePath();
-  ctx.clip();
   var s = Math.max(iw / img.naturalWidth, ih / img.naturalHeight);
   ctx.drawImage(img, -img.naturalWidth * s / 2, topY + ih / 2 - img.naturalHeight * s / 2,
     img.naturalWidth * s, img.naturalHeight * s);
   ctx.restore();
-  // ラベル（上半分の左上）
+  // ラベル（左上）
   ctx.save();
   ctx.font = 'bold 24px sans-serif';
   var tw = ctx.measureText(label).width;
@@ -439,19 +431,6 @@ function trumpHalf(img, label, inverted) {
   ctx.textBaseline = 'middle';
   ctx.fillText(label, -iw / 2 + 12 + (tw + 24) / 2, topY + 33);
   ctx.restore();
-  ctx.restore();
-}
-
-// 表：上がBefore（正向き）、下がAfter（トランプ式に逆さ）、区切りは斜め
-function trumpFront() {
-  trumpBase();
-  trumpHalf(imgBefore, 'Before', false);
-  trumpHalf(imgAfter, 'After', true);
-  // 中央のダイヤ
-  ctx.save();
-  ctx.rotate(Math.PI / 4);
-  ctx.fillStyle = '#b08968';
-  ctx.fillRect(-8, -8, 16, 16);
   ctx.restore();
 }
 
@@ -500,16 +479,22 @@ function trumpBack() {
   ctx.restore();
 }
 
-function trumpDrawFace(face, rotDeg, sx, scale, alpha, dy, shade) {
+function trumpDrawFace(face, rotDeg, sx, scale, alpha, dy, shade, flash) {
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(W / 2, H / 2 + (dy || 0));
   ctx.rotate(rotDeg * Math.PI / 180);
   ctx.scale(Math.max(0.02, Math.abs(sx)) * scale, scale);
   if (face === 'back') trumpBack();
-  else trumpFront();
+  else if (face === 'before') { trumpBase(); trumpPhoto(imgBefore, 'Before', false); }
+  else { trumpBase(); trumpPhoto(imgAfter, 'After', true); }
   if (shade > 0) {
     ctx.fillStyle = 'rgba(0,0,0,' + shade.toFixed(3) + ')';
+    trumpRoundRect(-TRUMP_W / 2, -TRUMP_H / 2, TRUMP_W, TRUMP_H, 28);
+    ctx.fill();
+  }
+  if (flash > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,' + flash.toFixed(3) + ')';
     trumpRoundRect(-TRUMP_W / 2, -TRUMP_H / 2, TRUMP_W, TRUMP_H, 28);
     ctx.fill();
   }
@@ -520,25 +505,27 @@ function drawTrump(t) {
   ctx.fillStyle = '#e9dfd2';
   ctx.fillRect(0, 0, W, H);
   var IN = 0.85;                 // 裏で登場
-  var FLIP1 = 2.0, FLIPD = 0.7;  // 裏→表にめくれる
-  var SWAP = 5.2, ROTD = 1.0;    // カードごと180°回って上下入れ替わり
+  var FLIP1 = 2.0, FLIPD = 0.7;  // 裏→表（Before全面）にめくれる
+  var SWAP = 5.2, ROTD = 1.0;    // カードごと180°回転、途中でAfterに入替＋白フラッシュ
   if (t < IN) {
     var p = easeOutBack(Math.min(1, t / IN));
-    trumpDrawFace('back', lerp(-16, 0, p), 1, 0.92 + 0.08 * p, Math.min(1, t / 0.3), (1 - p) * -140, 0);
+    trumpDrawFace('back', lerp(-16, 0, p), 1, 0.92 + 0.08 * p, Math.min(1, t / 0.3), (1 - p) * -140, 0, 0);
   } else if (t < FLIP1) {
-    trumpDrawFace('back', 0, 1, 1, 1, 0, 0);
+    trumpDrawFace('back', 0, 1, 1, 1, 0, 0, 0);
   } else if (t < FLIP1 + FLIPD) {
     var fp = (t - FLIP1) / FLIPD, th = fp * Math.PI;
-    trumpDrawFace(fp < 0.5 ? 'back' : 'front', 0, Math.cos(th), 1, 1, 0, Math.sin(th) * 0.22);
+    trumpDrawFace(fp < 0.5 ? 'back' : 'before', 0, Math.cos(th), 1, 1, 0, Math.sin(th) * 0.22, 0);
   } else if (t < SWAP) {
     var g1 = 1 + 0.02 * easeInOut(Math.min(1, (t - FLIP1 - FLIPD) / (SWAP - FLIP1 - FLIPD)));
-    trumpDrawFace('front', 0, 1, g1, 1, 0, 0);
+    trumpDrawFace('before', 0, 1, g1, 1, 0, 0, 0);
   } else if (t < SWAP + ROTD) {
     var rp = easeInOut((t - SWAP) / ROTD);
-    trumpDrawFace('front', 180 * rp, 1, 1 - 0.06 * Math.sin(rp * Math.PI), 1, 0, 0);
+    var face2 = rp < 0.5 ? 'before' : 'after';
+    var flash = Math.max(0, 1 - Math.abs(rp - 0.5) / 0.14) * 0.85;
+    trumpDrawFace(face2, 180 * rp, 1, 1 - 0.06 * Math.sin(rp * Math.PI), 1, 0, 0, flash);
   } else {
     var g2 = 1 + 0.02 * easeInOut(Math.min(1, (t - SWAP - ROTD) / 1.5));
-    trumpDrawFace('front', 180, 1, g2, 1, 0, 0);
+    trumpDrawFace('after', 180, 1, g2, 1, 0, 0, 0);
   }
 }
 
