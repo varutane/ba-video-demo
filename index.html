@@ -135,9 +135,11 @@
 <section>
   <h2>3. 音楽</h2>
   <div class="choices" id="musicChoices">
-    <label><input type="radio" name="music" value="pop" checked>あかるいポップ</label>
-    <label><input type="radio" name="music" value="chill">おちついたチル</label>
-    <label><input type="radio" name="music" value="up">元気なアップテンポ</label>
+    <label><input type="radio" name="music" value="suno1" checked>フレッシュ（明るいポップ）</label>
+    <label><input type="radio" name="music" value="suno2">カフェ（アコースティック）</label>
+    <label><input type="radio" name="music" value="suno3">シティポップ</label>
+    <label><input type="radio" name="music" value="suno4">ピアノ（上品）</label>
+    <label><input type="radio" name="music" value="suno5">チル（エレクトロ）</label>
     <label><input type="radio" name="music" value="file">自分の音源ファイル</label>
     <label><input type="radio" name="music" value="none">音楽なし</label>
   </div>
@@ -402,44 +404,49 @@ function trumpBase() {
   ctx.restore();
 }
 
-function trumpPhoto(img, y, h, label, inverted) {
-  var pad = 14, w = TRUMP_W - pad * 2;
+// カードの上半分を、斜めの区切りで描く。
+// 下半分は inverted=true で中心から180°回して同じ描き方をすると、
+// 斜め線がそのまま重なり、写真とラベルが逆さになって下に現れる。
+function trumpHalf(img, label, inverted) {
+  var pad = 14, iw = TRUMP_W - pad * 2, ih = TRUMP_H - pad * 2;
+  var topY = -TRUMP_H / 2 + pad, slant = 52, gap = 6;
+  function bY(x) { return -slant + 2 * slant * (x + iw / 2) / iw; }
   ctx.save();
-  if (inverted) {
-    // トランプの下半分：枠の中心で180°回して描く（写真もラベルも逆さになる）
-    ctx.translate(0, y + h / 2);
-    ctx.rotate(Math.PI);
-    ctx.translate(0, -(y + h / 2));
-  }
+  if (inverted) ctx.rotate(Math.PI);
   ctx.save();
-  trumpRoundRect(-w / 2, y, w, h, 14);
+  trumpRoundRect(-iw / 2, topY, iw, ih, 14);
   ctx.clip();
-  var s = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  ctx.drawImage(img, -img.naturalWidth * s / 2, y + h / 2 - img.naturalHeight * s / 2,
+  ctx.beginPath();
+  ctx.moveTo(-iw / 2, topY);
+  ctx.lineTo(iw / 2, topY);
+  ctx.lineTo(iw / 2, bY(iw / 2) - gap);
+  ctx.lineTo(-iw / 2, bY(-iw / 2) - gap);
+  ctx.closePath();
+  ctx.clip();
+  var s = Math.max(iw / img.naturalWidth, ih / img.naturalHeight);
+  ctx.drawImage(img, -img.naturalWidth * s / 2, topY + ih / 2 - img.naturalHeight * s / 2,
     img.naturalWidth * s, img.naturalHeight * s);
   ctx.restore();
+  // ラベル（上半分の左上）
   ctx.save();
   ctx.font = 'bold 24px sans-serif';
   var tw = ctx.measureText(label).width;
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  trumpRoundRect(-w / 2 + 12, y + 12, tw + 24, 40, 10);
+  trumpRoundRect(-iw / 2 + 12, topY + 12, tw + 24, 40, 10);
   ctx.fill();
   ctx.fillStyle = '#fff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, -w / 2 + 12 + (tw + 24) / 2, y + 33);
+  ctx.fillText(label, -iw / 2 + 12 + (tw + 24) / 2, topY + 33);
   ctx.restore();
   ctx.restore();
 }
 
-// 表：上がBefore（正向き）、下がAfter（トランプ式に逆さ）
+// 表：上がBefore（正向き）、下がAfter（トランプ式に逆さ）、区切りは斜め
 function trumpFront() {
   trumpBase();
-  var pad = 14, gap = 10;
-  var ph = (TRUMP_H - pad * 2 - gap) / 2;
-  var topY = -TRUMP_H / 2 + pad;
-  trumpPhoto(imgBefore, topY, ph, 'Before', false);
-  trumpPhoto(imgAfter, topY + ph + gap, ph, 'After', true);
+  trumpHalf(imgBefore, 'Before', false);
+  trumpHalf(imgAfter, 'After', true);
   // 中央のダイヤ
   ctx.save();
   ctx.rotate(Math.PI / 4);
@@ -770,9 +777,42 @@ function scheduleUserAudio(ac, dest, buffer, startAt, dur) {
   src.stop(startAt + dur + 0.05);
 }
 
+/* ===== 組み込み楽曲（Suno生成・Aテイク） ===== */
+var SUNO_TRACKS = {
+  suno1: 'audio/fresh-finish-a.mp3',
+  suno2: 'audio/salon-cafe-a.mp3',
+  suno3: 'audio/city-gloss-a.mp3',
+  suno4: 'audio/quiet-elegance-a.mp3',
+  suno5: 'audio/soft-reset-a.mp3'
+};
+var sunoBuffers = {};
+var sunoDecoding = {};
+
+function loadSuno(key) {
+  if (!SUNO_TRACKS[key] || sunoBuffers[key] || sunoDecoding[key]) return;
+  sunoDecoding[key] = true;
+  fetch(SUNO_TRACKS[key]).then(function (r) { return r.arrayBuffer(); })
+    .then(function (ab) {
+      var dctx = new (window.AudioContext || window.webkitAudioContext)();
+      return dctx.decodeAudioData(ab).then(function (buf) {
+        sunoBuffers[key] = buf;
+        try { dctx.close(); } catch (e) {}
+      }, function (err) {
+        try { dctx.close(); } catch (e) {}
+        throw err;
+      });
+    }).then(function () {
+      sunoDecoding[key] = false;
+    }).catch(function () {
+      sunoDecoding[key] = false;
+    });
+}
+loadSuno('suno1');
+
 document.getElementById('musicChoices').addEventListener('change', function () {
-  var isFile = selected('music') === 'file';
-  document.getElementById('audioFileBox').style.display = isFile ? 'block' : 'none';
+  var music = selected('music');
+  document.getElementById('audioFileBox').style.display = music === 'file' ? 'block' : 'none';
+  if (SUNO_TRACKS[music]) loadSuno(music);
 });
 
 document.getElementById('fileAudio').addEventListener('change', function (ev) {
@@ -907,6 +947,13 @@ document.getElementById('makeBtn').addEventListener('click', function () {
     making = false;
     return;
   }
+  if (SUNO_TRACKS[music] && !sunoBuffers[music]) {
+    loadSuno(music);
+    setStatus('楽曲を読み込んでいます。少し待ってから、もう一度押してください。');
+    btn.disabled = false;
+    making = false;
+    return;
+  }
 
   var ac = null;
   var stream = cv.captureStream(30);
@@ -919,6 +966,8 @@ document.getElementById('makeBtn').addEventListener('click', function () {
       comp.connect(ac.destination); // 生成中にも聞こえるように
       if (music === 'file') {
         scheduleUserAudio(ac, comp, userAudioBuffer, ac.currentTime + 0.1, TOTAL);
+      } else if (SUNO_TRACKS[music]) {
+        scheduleUserAudio(ac, comp, sunoBuffers[music], ac.currentTime + 0.1, TOTAL);
       } else {
         scheduleTrack(ac, comp, music, ac.currentTime + 0.1, TOTAL);
       }
