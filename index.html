@@ -364,9 +364,10 @@ function drawCollage(t) {
 }
 
 /* ===== トランプ（お店のカード） =====
-   裏＝お店のカード（名前・ロゴ）。めくれると表に上下Before/After。
-   もう一度めくれて戻ると、上下が入れ替わる。 */
-var TRUMP_W = 540, TRUMP_H = 840;
+   裏＝お店のカード（名前・ロゴ）。めくれると表に上下Before/After
+   （下半分はトランプ式に逆さ）。カードが180°回ると上下が入れ替わり、
+   下だったAfterが上になって正向きになる。 */
+var TRUMP_W = 664, TRUMP_H = 1180;
 
 function trumpRoundRect(x, y, w, h, r) {
   ctx.beginPath();
@@ -394,8 +395,15 @@ function trumpBase() {
   ctx.restore();
 }
 
-function trumpPhoto(img, y, h, label) {
-  var pad = 16, w = TRUMP_W - pad * 2;
+function trumpPhoto(img, y, h, label, inverted) {
+  var pad = 14, w = TRUMP_W - pad * 2;
+  ctx.save();
+  if (inverted) {
+    // トランプの下半分：枠の中心で180°回して描く（写真もラベルも逆さになる）
+    ctx.translate(0, y + h / 2);
+    ctx.rotate(Math.PI);
+    ctx.translate(0, -(y + h / 2));
+  }
   ctx.save();
   trumpRoundRect(-w / 2, y, w, h, 14);
   ctx.clip();
@@ -414,16 +422,17 @@ function trumpPhoto(img, y, h, label) {
   ctx.textBaseline = 'middle';
   ctx.fillText(label, -w / 2 + 12 + (tw + 24) / 2, y + 33);
   ctx.restore();
+  ctx.restore();
 }
 
-// 表：上下に写真（swapped=false: 上Before/下After、true: 入れ替え後）
-function trumpFront(swapped) {
+// 表：上がBefore（正向き）、下がAfter（トランプ式に逆さ）
+function trumpFront() {
   trumpBase();
-  var pad = 16, gap = 10;
+  var pad = 14, gap = 10;
   var ph = (TRUMP_H - pad * 2 - gap) / 2;
   var topY = -TRUMP_H / 2 + pad;
-  trumpPhoto(swapped ? imgAfter : imgBefore, topY, ph, swapped ? 'After' : 'Before');
-  trumpPhoto(swapped ? imgBefore : imgAfter, topY + ph + gap, ph, swapped ? 'Before' : 'After');
+  trumpPhoto(imgBefore, topY, ph, 'Before', false);
+  trumpPhoto(imgAfter, topY + ph + gap, ph, 'After', true);
   // 中央のダイヤ
   ctx.save();
   ctx.rotate(Math.PI / 4);
@@ -474,7 +483,7 @@ function trumpDrawFace(face, rotDeg, sx, scale, alpha, dy, shade) {
   ctx.rotate(rotDeg * Math.PI / 180);
   ctx.scale(Math.max(0.02, Math.abs(sx)) * scale, scale);
   if (face === 'back') trumpBack();
-  else trumpFront(face === 'frontB');
+  else trumpFront();
   if (shade > 0) {
     ctx.fillStyle = 'rgba(0,0,0,' + shade.toFixed(3) + ')';
     trumpRoundRect(-TRUMP_W / 2, -TRUMP_H / 2, TRUMP_W, TRUMP_H, 28);
@@ -487,8 +496,8 @@ function drawTrump(t) {
   ctx.fillStyle = '#e9dfd2';
   ctx.fillRect(0, 0, W, H);
   var IN = 0.85;                 // 裏で登場
-  var FLIP1 = 2.0, FLIPD = 0.7;  // 裏→表
-  var SWAP = 5.2, SWAPD = 0.6, BACKHOLD = 0.25; // 表→裏→（入れ替わった）表
+  var FLIP1 = 2.0, FLIPD = 0.7;  // 裏→表にめくれる
+  var SWAP = 5.2, ROTD = 1.0;    // カードごと180°回って上下入れ替わり
   if (t < IN) {
     var p = easeOutBack(Math.min(1, t / IN));
     trumpDrawFace('back', lerp(-16, 0, p), 1, 0.92 + 0.08 * p, Math.min(1, t / 0.3), (1 - p) * -140, 0);
@@ -496,21 +505,16 @@ function drawTrump(t) {
     trumpDrawFace('back', 0, 1, 1, 1, 0, 0);
   } else if (t < FLIP1 + FLIPD) {
     var fp = (t - FLIP1) / FLIPD, th = fp * Math.PI;
-    trumpDrawFace(fp < 0.5 ? 'back' : 'frontA', 0, Math.cos(th), 1, 1, 0, Math.sin(th) * 0.22);
+    trumpDrawFace(fp < 0.5 ? 'back' : 'front', 0, Math.cos(th), 1, 1, 0, Math.sin(th) * 0.22);
   } else if (t < SWAP) {
     var g1 = 1 + 0.02 * easeInOut(Math.min(1, (t - FLIP1 - FLIPD) / (SWAP - FLIP1 - FLIPD)));
-    trumpDrawFace('frontA', 0, 1, g1, 1, 0, 0);
-  } else if (t < SWAP + SWAPD) {
-    var sp = (t - SWAP) / SWAPD, th2 = sp * Math.PI;
-    trumpDrawFace(sp < 0.5 ? 'frontA' : 'back', 0, Math.cos(th2), 1, 1, 0, Math.sin(th2) * 0.22);
-  } else if (t < SWAP + SWAPD + BACKHOLD) {
-    trumpDrawFace('back', 0, 1, 1, 1, 0, 0);
-  } else if (t < SWAP + SWAPD + BACKHOLD + SWAPD) {
-    var sp2 = (t - SWAP - SWAPD - BACKHOLD) / SWAPD, th3 = sp2 * Math.PI;
-    trumpDrawFace(sp2 < 0.5 ? 'back' : 'frontB', 0, Math.cos(th3), 1, 1, 0, Math.sin(th3) * 0.22);
+    trumpDrawFace('front', 0, 1, g1, 1, 0, 0);
+  } else if (t < SWAP + ROTD) {
+    var rp = easeInOut((t - SWAP) / ROTD);
+    trumpDrawFace('front', 180 * rp, 1, 1 - 0.06 * Math.sin(rp * Math.PI), 1, 0, 0);
   } else {
-    var g2 = 1 + 0.02 * easeInOut(Math.min(1, (t - SWAP - SWAPD * 2 - BACKHOLD) / 1.5));
-    trumpDrawFace('frontB', 0, 1, g2, 1, 0, 0);
+    var g2 = 1 + 0.02 * easeInOut(Math.min(1, (t - SWAP - ROTD) / 1.5));
+    trumpDrawFace('front', 180, 1, g2, 1, 0, 0);
   }
 }
 
